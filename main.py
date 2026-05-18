@@ -62,8 +62,7 @@ def fetch_symbols():
     return symbols
 
 
-# TEST NOTIFICATION
-send_notification("TEST ALERT WORKING")
+
 
 
 while True:
