@@ -52,16 +52,38 @@ def market_open():
 
     return "09:15" <= current <= "15:30"
 
-# ===== NSE SESSION =====
+# ===== SESSION =====
 session = requests.Session()
 
 headers = {
     "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "application/json"
+    "Referer": "https://www.nseindia.com/"
 }
 
-session.get("https://www.nseindia.com", headers=headers)
+# ===== CREATE NSE SESSION =====
+try:
+
+    session.get(
+        "https://www.nseindia.com",
+        headers=headers,
+        timeout=20
+    )
+
+    time.sleep(3)
+
+    session.get(
+        "https://www.nseindia.com/market-data/oi-spurts",
+        headers=headers,
+        timeout=20
+    )
+
+    print("NSE Session Ready")
+
+except Exception as e:
+
+    print("Session Error:", e)
 
 # ===== FETCH DATA =====
 def fetch_data():
@@ -71,6 +93,12 @@ def fetch_data():
         headers=headers,
         timeout=20
     )
+
+    print("Status Code:", response.status_code)
+
+    if response.status_code != 200:
+
+        raise Exception(f"NSE API Failed: {response.status_code}")
 
     data = response.json()
 
@@ -84,7 +112,7 @@ def fetch_data():
 
     return rr, rs, sr, ss
 
-# ===== FORMAT DATA =====
+# ===== FORMAT MESSAGE =====
 def format_message(title, rows):
 
     msg = f"{title}\n\n"
@@ -95,13 +123,13 @@ def format_message(title, rows):
 
             symbol = row["symbol"]
 
+            instrument = row["instrument"]
+
             price = row["pChange"]
 
             oi = row["pChangeInOI"]
 
             ltp = row["ltp"]
-
-            instrument = row["instrument"]
 
             msg += (
                 f"{symbol}\n"
@@ -116,7 +144,7 @@ def format_message(title, rows):
 
     return msg
 
-# ===== NEW STOCK ALERT =====
+# ===== NEW ENTRY ALERT =====
 def process_new(rows, baseline, category):
 
     current = set()
@@ -164,8 +192,8 @@ def process_new(rows, baseline, category):
 
     return current
 
-# ===== START =====
-send_notification("NSE OI ALERT SYSTEM STARTED")
+# ===== TEST START =====
+send_notification("BOT RESTARTED SUCCESSFULLY")
 
 # ===== MAIN LOOP =====
 while True:
@@ -176,9 +204,11 @@ while True:
 
         current_time = now.strftime("%H:%M")
 
+        print("Running:", current_time)
+
         rr, rs, sr, ss = fetch_data()
 
-        # ===== 09:15 MORNING DATA =====
+        # ===== 09:15 MORNING SUMMARY =====
         if current_time >= "09:15" and not morning_sent:
 
             baseline_rr = set(x["identifier"] for x in rr)
@@ -251,7 +281,7 @@ while True:
                 "Slide in OI + Slide in Price"
             )
 
-        # ===== 03:30 PM CLOSING =====
+        # ===== 03:30 PM CLOSING SUMMARY =====
         if current_time >= "15:30" and not closing_sent:
 
             send_notification(
@@ -295,5 +325,7 @@ while True:
     except Exception as e:
 
         print("MAIN ERROR:", e)
+
+        send_notification(f"ERROR\n\n{e}")
 
     time.sleep(60)
