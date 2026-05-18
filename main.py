@@ -4,13 +4,13 @@ import time
 from datetime import datetime
 import pytz
 
-TOPIC = "nseoialerts"
+TOPIC = "nseoialert"
 
 previous_symbols = set()
 
 def send_notification(message):
     requests.post(
-        f"https://ntfy.sh/naeoialerts",
+        f"https://ntfy.sh/nseoialert",
         data=message.encode("utf-8")
     )
 
@@ -59,6 +59,7 @@ def fetch_symbols():
         browser.close()
 
     return symbols
+    send_notification("TEST ALERT WORKING")
 
 while True:
 
