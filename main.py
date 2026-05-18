@@ -10,7 +10,7 @@ previous_symbols = set()
 
 def send_notification(message):
     requests.post(
-        f"https://ntfy.sh/nseoialert",
+        f"https://ntfy.sh/{TOPIC}",
         data=message.encode("utf-8")
     )
 
@@ -20,6 +20,7 @@ def market_open():
 
     now = datetime.now(india)
 
+    # Saturday = 5, Sunday = 6
     if now.weekday() >= 5:
         return False
 
@@ -59,7 +60,11 @@ def fetch_symbols():
         browser.close()
 
     return symbols
-    send_notification("TEST ALERT WORKING")
+
+
+# TEST NOTIFICATION
+send_notification("TEST ALERT WORKING")
+
 
 while True:
 
