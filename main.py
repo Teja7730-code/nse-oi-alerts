@@ -1,9 +1,8 @@
+from playwright.sync_api import sync_playwright
 import requests
-import pandas as pd
 import time
 from datetime import datetime
 import pytz
-from io import StringIO
 
 TOPIC = "nseoialert"
 
@@ -17,12 +16,7 @@ already_alerted_slide = set()
 morning_sent = False
 closing_sent = False
 
-# ===== CSV URLS =====
-rise_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_1.csv"
-
-slide_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_2.csv"
-
-# ===== NOTIFICATION =====
+# ===== SEND NOTIFICATION =====
 def send_notification(message):
 
     requests.post(
@@ -30,14 +24,14 @@ def send_notification(message):
         data=message.encode("utf-8")
     )
 
-# ===== CURRENT TIME =====
+# ===== INDIA TIME =====
 def get_india_time():
 
     india = pytz.timezone("Asia/Kolkata")
 
     return datetime.now(india)
 
-# ===== MARKET TIME =====
+# ===== MARKET HOURS =====
 def market_open():
 
     now = get_india_time()
@@ -49,189 +43,235 @@ def market_open():
 
     return "09:15" <= current_time <= "15:30"
 
-# ===== FETCH CSV =====
-def fetch_csv(url):
+# ===== FETCH TABLE DATA =====
+def fetch_category_data(page, category_name):
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    data = []
 
-    response = requests.get(url, headers=headers)
+    # Open dropdown
+    page.click("div.filter")
 
-    return pd.read_csv(StringIO(response.text))
+    page.wait_for_timeout(1000)
 
-# ===== FORMAT SUMMARY =====
-def create_summary(df, title):
+    # Select category
+    page.click(f"text='{category_name}'")
 
-    message = f"{title}\n\n"
+    page.wait_for_timeout(5000)
 
-    for _, row in df.iterrows():
+    rows = page.locator("table tbody tr")
+
+    count = rows.count()
+
+    for i in range(count):
 
         try:
 
-            symbol = str(row["Symbol"])
+            cols = rows.nth(i).locator("td")
 
-            oi_change = str(row["%chng<br/>in OI"])
+            symbol = cols.nth(1).inner_text().strip()
 
-            price_change = str(row["% CHNG in LTP"])
+            oi_change = cols.nth(6).inner_text().strip()
 
-            ltp = str(row["LTP"])
+            price_change = cols.nth(7).inner_text().strip()
 
-            message += (
-                f"{symbol}\n"
-                f"OI: {oi_change}%\n"
-                f"Price: {price_change}%\n"
-                f"LTP: {ltp}\n\n"
-            )
+            ltp = cols.nth(5).inner_text().strip()
+
+            volume = cols.nth(4).inner_text().strip()
+
+            data.append({
+                "symbol": symbol,
+                "oi_change": oi_change,
+                "price_change": price_change,
+                "ltp": ltp,
+                "volume": volume
+            })
 
         except:
             pass
 
-    return message
+    return data
+
+# ===== CREATE SUMMARY =====
+def create_summary(data, title):
+
+    msg = f"{title}\n\n"
+
+    for item in data:
+
+        msg += (
+            f"{item['symbol']}\n"
+            f"OI: {item['oi_change']}\n"
+            f"Price: {item['price_change']}\n"
+            f"LTP: {item['ltp']}\n\n"
+        )
+
+    return msg
 
 # ===== PROCESS NEW STOCKS =====
-def process_new_stocks(df, baseline_set, alerted_set, category_name):
+def process_new_stocks(data, baseline_set, alerted_set, category_name):
 
-    current_symbols = set(df["Symbol"].astype(str))
+    current_symbols = set([x["symbol"] for x in data])
 
     new_symbols = current_symbols - baseline_set
 
-    for symbol in new_symbols:
+    for item in data:
 
-        if symbol not in alerted_set:
+        symbol = item["symbol"]
 
-            try:
+        if symbol in new_symbols and symbol not in alerted_set:
 
-                row = df[df["Symbol"] == symbol].iloc[0]
+            msg = (
+                f"NEW STOCK ADDED\n\n"
+                f"Category:\n{category_name}\n\n"
+                f"Symbol: {symbol}\n\n"
+                f"OI Change: {item['oi_change']}\n"
+                f"Price Change: {item['price_change']}\n"
+                f"LTP: {item['ltp']}\n"
+                f"Volume: {item['volume']}"
+            )
 
-                msg = (
-                    f"NEW STOCK ADDED\n\n"
-                    f"Category:\n{category_name}\n\n"
-                    f"Symbol: {symbol}\n\n"
-                    f"OI Change: {row['%chng<br/>in OI']}%\n"
-                    f"Price Change: {row['% CHNG in LTP']}%\n"
-                    f"LTP: {row['LTP']}\n"
-                    f"Volume: {row['Volume']}"
-                )
+            print(msg)
 
-                print(msg)
+            send_notification(msg)
 
-                send_notification(msg)
+            alerted_set.add(symbol)
 
-                alerted_set.add(symbol)
+# ===== PLAYWRIGHT =====
+with sync_playwright() as p:
 
-            except Exception as e:
+    browser = p.chromium.launch(headless=True)
 
-                print("Alert Error:", e)
+    page = browser.new_page()
 
-# ===== TEST CURRENT MARKET CLOSE SUMMARY =====
-try:
+    page.goto("https://www.nseindia.com/market-data/oi-spurts")
 
-    rise_df = fetch_csv(rise_url)
+    page.wait_for_timeout(10000)
 
-    slide_df = fetch_csv(slide_url)
-
-    rise_summary = create_summary(
-        rise_df,
-        "03:30 PM CLOSE\nRise in OI and Rise in Price\n"
-    )
-
-    slide_summary = create_summary(
-        slide_df,
-        "03:30 PM CLOSE\nSlide in OI and Rise in Price\n"
-    )
-
-    send_notification(rise_summary)
-
-    time.sleep(2)
-
-    send_notification(slide_summary)
-
-except Exception as e:
-
-    send_notification(f"TEST ERROR\n{e}")
-
-# ===== MAIN LOOP =====
-while True:
-
+    # ===== TEST CURRENT CLOSE DATA =====
     try:
 
-        now = get_india_time()
+        rise_data = fetch_category_data(
+            page,
+            "Rise in OI and Rise in Price"
+        )
 
-        current_time = now.strftime("%H:%M")
+        slide_data = fetch_category_data(
+            page,
+            "Slide in OI and Rise in Price"
+        )
 
-        rise_df = fetch_csv(rise_url)
-
-        slide_df = fetch_csv(slide_url)
-
-        # ===== MORNING SUMMARY =====
-        if current_time >= "09:15" and not morning_sent:
-
-            baseline_rise = set(rise_df["Symbol"].astype(str))
-            baseline_slide = set(slide_df["Symbol"].astype(str))
-
-            rise_summary = create_summary(
-                rise_df,
-                "09:15 AM\nRise in OI and Rise in Price\n"
+        send_notification(
+            create_summary(
+                rise_data,
+                "TEST CLOSE DATA\nRise in OI and Rise in Price"
             )
+        )
 
-            slide_summary = create_summary(
-                slide_df,
-                "09:15 AM\nSlide in OI and Rise in Price\n"
+        time.sleep(2)
+
+        send_notification(
+            create_summary(
+                slide_data,
+                "TEST CLOSE DATA\nSlide in OI and Rise in Price"
             )
-
-            send_notification(rise_summary)
-
-            time.sleep(2)
-
-            send_notification(slide_summary)
-
-            morning_sent = True
-
-            print("Morning summary sent")
-
-        # ===== LIVE MARKET =====
-        if market_open():
-
-            process_new_stocks(
-                rise_df,
-                baseline_rise,
-                already_alerted_rise,
-                "Rise in OI and Rise in Price"
-            )
-
-            process_new_stocks(
-                slide_df,
-                baseline_slide,
-                already_alerted_slide,
-                "Slide in OI and Rise in Price"
-            )
-
-        # ===== MARKET CLOSE SUMMARY =====
-        if current_time >= "15:30" and not closing_sent:
-
-            rise_summary = create_summary(
-                rise_df,
-                "03:30 PM CLOSE\nRise in OI and Rise in Price\n"
-            )
-
-            slide_summary = create_summary(
-                slide_df,
-                "03:30 PM CLOSE\nSlide in OI and Rise in Price\n"
-            )
-
-            send_notification(rise_summary)
-
-            time.sleep(2)
-
-            send_notification(slide_summary)
-
-            closing_sent = True
-
-            print("Closing summary sent")
+        )
 
     except Exception as e:
 
-        print("MAIN ERROR:", e)
+        send_notification(f"TEST ERROR\n{e}")
 
-    time.sleep(60)
+    # ===== MAIN LOOP =====
+    while True:
+
+        try:
+
+            now = get_india_time()
+
+            current_time = now.strftime("%H:%M")
+
+            rise_data = fetch_category_data(
+                page,
+                "Rise in OI and Rise in Price"
+            )
+
+            slide_data = fetch_category_data(
+                page,
+                "Slide in OI and Rise in Price"
+            )
+
+            # ===== MORNING SUMMARY =====
+            if current_time >= "09:15" and not morning_sent:
+
+                baseline_rise = set(
+                    [x["symbol"] for x in rise_data]
+                )
+
+                baseline_slide = set(
+                    [x["symbol"] for x in slide_data]
+                )
+
+                send_notification(
+                    create_summary(
+                        rise_data,
+                        "09:15 AM\nRise in OI and Rise in Price"
+                    )
+                )
+
+                time.sleep(2)
+
+                send_notification(
+                    create_summary(
+                        slide_data,
+                        "09:15 AM\nSlide in OI and Rise in Price"
+                    )
+                )
+
+                morning_sent = True
+
+                print("Morning summary sent")
+
+            # ===== LIVE ALERTS =====
+            if market_open():
+
+                process_new_stocks(
+                    rise_data,
+                    baseline_rise,
+                    already_alerted_rise,
+                    "Rise in OI and Rise in Price"
+                )
+
+                process_new_stocks(
+                    slide_data,
+                    baseline_slide,
+                    already_alerted_slide,
+                    "Slide in OI and Rise in Price"
+                )
+
+            # ===== MARKET CLOSE =====
+            if current_time >= "15:30" and not closing_sent:
+
+                send_notification(
+                    create_summary(
+                        rise_data,
+                        "03:30 PM CLOSE\nRise in OI and Rise in Price"
+                    )
+                )
+
+                time.sleep(2)
+
+                send_notification(
+                    create_summary(
+                        slide_data,
+                        "03:30 PM CLOSE\nSlide in OI and Rise in Price"
+                    )
+                )
+
+                closing_sent = True
+
+                print("Closing summary sent")
+
+        except Exception as e:
+
+            print("MAIN ERROR:", e)
+
+        time.sleep(60)
