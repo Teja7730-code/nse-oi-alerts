@@ -1,14 +1,17 @@
-from playwright.sync_api import sync_playwright
 import requests
+import pandas as pd
 import time
 from datetime import datetime
 import pytz
+from io import StringIO
 
 TOPIC = "nseoialert"
 
-previous_symbols = set()
+baseline_rise = set()
+baseline_slide = set()
 
 def send_notification(message):
+
     requests.post(
         f"https://ntfy.sh/{TOPIC}",
         data=message.encode("utf-8")
@@ -20,7 +23,6 @@ def market_open():
 
     now = datetime.now(india)
 
-    # Saturday = 5, Sunday = 6
     if now.weekday() >= 5:
         return False
 
@@ -28,42 +30,65 @@ def market_open():
 
     return "09:15" <= current_time <= "15:30"
 
-def fetch_symbols():
+def fetch_csv(url):
 
-    symbols = []
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    with sync_playwright() as p:
+    response = requests.get(url, headers=headers)
 
-        browser = p.chromium.launch(headless=True)
+    return pd.read_csv(StringIO(response.text))
 
-        page = browser.new_page()
+def process_category(df, baseline_set, category_name):
 
-        page.goto("https://www.nseindia.com/market-data/oi-spurts")
+    current_symbols = set(df["Symbol"].astype(str))
 
-        page.wait_for_timeout(8000)
+    new_symbols = current_symbols - baseline_set
 
-        rows = page.locator("table tbody tr")
+    for symbol in new_symbols:
 
-        count = rows.count()
+        try:
 
-        for i in range(count):
+            row = df[df["Symbol"] == symbol].iloc[0]
 
-            try:
-                symbol = rows.nth(i).locator("td").nth(1).inner_text()
+            msg = f"""
+NEW STOCK ADDED
 
-                if symbol.strip():
-                    symbols.append(symbol.strip())
+Category:
+{category_name}
 
-            except:
-                pass
+Symbol: {symbol}
 
-        browser.close()
+OI Change:
+{row['%chng<br/>in OI']}%
 
-    return symbols
+Price Change:
+{row['% CHNG in LTP']}%
 
+LTP:
+{row['LTP']}
 
+Volume:
+{row['Volume']}
 
+Instrument:
+{row['Instrument']}
+"""
 
+            print(msg)
+
+            send_notification(msg)
+
+        except Exception as e:
+            print("Alert error:", e)
+
+    return current_symbols
+
+rise_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_1.csv"
+slide_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_2.csv"
+
+baseline_saved = False
 
 while True:
 
@@ -71,27 +96,40 @@ while True:
 
         if market_open():
 
-            current_symbols = set(fetch_symbols())
+            rise_df = fetch_csv(rise_url)
 
-            new_symbols = current_symbols - previous_symbols
+            slide_df = fetch_csv(slide_url)
 
-            if previous_symbols:
+            if not baseline_saved:
 
-                for symbol in new_symbols:
+                baseline_rise = set(rise_df["Symbol"].astype(str))
 
-                    msg = f"NEW STOCK DETECTED\n\n{symbol}"
+                baseline_slide = set(slide_df["Symbol"].astype(str))
 
-                    print(msg)
+                baseline_saved = True
 
-                    send_notification(msg)
+                print("Morning baseline saved")
 
-            previous_symbols = current_symbols
+            else:
+
+                process_category(
+                    rise_df,
+                    baseline_rise,
+                    "Rise in OI and Rise in Price"
+                )
+
+                process_category(
+                    slide_df,
+                    baseline_slide,
+                    "Slide in OI and Rise in Price"
+                )
 
         else:
+
             print("Market closed")
 
     except Exception as e:
 
-        print("Error:", e)
+        print("Main Error:", e)
 
     time.sleep(60)
