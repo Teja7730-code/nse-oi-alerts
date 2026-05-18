@@ -17,9 +17,15 @@ IGNORE_SYMBOLS = [
     "BANKEX"
 ]
 
+# ===== SETTINGS =====
+MIN_OI_CHANGE = 10
+MIN_PRICE_CHANGE = 0.5
+
 # ===== STORAGE =====
 baseline_rr = set()
 baseline_sr = set()
+
+appearance_count = {}
 
 morning_sent = False
 closing_sent = False
@@ -93,7 +99,7 @@ except Exception as e:
 
     print("Session Error:", e)
 
-# ===== FILTER STOCKS ONLY =====
+# ===== FILTER STOCKS =====
 def filter_rows(rows):
 
     filtered = []
@@ -113,6 +119,16 @@ def filter_rows(rows):
                     break
 
             if ignore:
+                continue
+
+            oi_change = float(row.get("pChangeInOI", 0))
+
+            price_change = float(row.get("pChange", 0))
+
+            if oi_change < MIN_OI_CHANGE:
+                continue
+
+            if price_change < MIN_PRICE_CHANGE:
                 continue
 
             filtered.append(row)
@@ -169,9 +185,13 @@ def format_message(title, rows):
 
             oi = row.get("pChangeInOI", "")
 
+            price = row.get("pChange", "")
+
             ltp = row.get("ltp", "")
 
             instrument = row.get("instrument", "")
+
+            volume = row.get("volume", "")
 
             msg += (
                 f"Symbol: {symbol}\n"
@@ -180,12 +200,14 @@ def format_message(title, rows):
                 f"Type: {option_type}\n"
                 f"Instrument: {instrument}\n"
                 f"OI Change: {oi}%\n"
-                f"LTP: {ltp}\n\n"
+                f"Price Change: {price}%\n"
+                f"LTP: {ltp}\n"
+                f"Volume: {volume}\n\n"
             )
 
             count += 1
 
-            if count >= 15:
+            if count >= 10:
                 break
 
         except:
@@ -193,7 +215,7 @@ def format_message(title, rows):
 
     return msg
 
-# ===== NEW ENTRY ALERT =====
+# ===== PROCESS NEW STOCKS =====
 def process_new(rows, baseline, category):
 
     current = set()
@@ -206,9 +228,18 @@ def process_new(rows, baseline, category):
 
             current.add(key)
 
-            if key not in baseline:
+            symbol = row.get("symbol", "")
 
-                symbol = row.get("symbol", "")
+            # ===== REPEATED APPEARANCE =====
+            if symbol not in appearance_count:
+                appearance_count[symbol] = 1
+            else:
+                appearance_count[symbol] += 1
+
+            repeat_count = appearance_count[symbol]
+
+            # ===== ONLY ALERT NEW ENTRIES =====
+            if key not in baseline:
 
                 expiry = row.get("expiryDate", "")
 
@@ -218,20 +249,36 @@ def process_new(rows, baseline, category):
 
                 oi = row.get("pChangeInOI", "")
 
+                price = row.get("pChange", "")
+
                 ltp = row.get("ltp", "")
 
                 instrument = row.get("instrument", "")
 
+                volume = row.get("volume", "")
+
+                confidence = "MEDIUM"
+
+                if repeat_count >= 3:
+                    confidence = "HIGH"
+
+                if repeat_count >= 5:
+                    confidence = "VERY HIGH"
+
                 msg = (
-                    f"NEW ENTRY DETECTED\n\n"
+                    f"NEW MOMENTUM ALERT\n\n"
                     f"Category:\n{category}\n\n"
+                    f"Confidence: {confidence}\n"
+                    f"Repeated Appearance: {repeat_count}\n\n"
                     f"Symbol: {symbol}\n"
                     f"Expiry: {expiry}\n"
                     f"Strike: {strike}\n"
                     f"Type: {option_type}\n"
-                    f"Instrument: {instrument}\n"
+                    f"Instrument: {instrument}\n\n"
                     f"OI Change: {oi}%\n"
-                    f"LTP: {ltp}"
+                    f"Price Change: {price}%\n"
+                    f"LTP: {ltp}\n"
+                    f"Volume: {volume}"
                 )
 
                 print(msg)
@@ -245,7 +292,7 @@ def process_new(rows, baseline, category):
     return current
 
 # ===== BOT START =====
-send_notification("NSE STOCK OI ALERT BOT STARTED")
+send_notification("ADVANCED NSE STOCK OI BOT STARTED")
 
 # ===== MAIN LOOP =====
 while True:
@@ -260,7 +307,7 @@ while True:
 
         rr, sr = fetch_data()
 
-        # ===== 09:15 SUMMARY =====
+        # ===== MORNING SUMMARY =====
         if current_time >= "09:15" and not morning_sent:
 
             baseline_rr = set(x["identifier"] for x in rr)
@@ -301,7 +348,7 @@ while True:
                 "Slide in OI + Rise in Price"
             )
 
-        # ===== 03:30 PM CLOSE =====
+        # ===== CLOSING SUMMARY =====
         if current_time >= "15:30" and not closing_sent:
 
             send_notification(
