@@ -7,11 +7,19 @@ TOPIC = "nseoialert"
 
 API_URL = "https://www.nseindia.com/api/live-analysis-oi-spurts-contracts"
 
+# ===== INDEX FILTER =====
+IGNORE_SYMBOLS = [
+    "NIFTY",
+    "BANKNIFTY",
+    "FINNIFTY",
+    "MIDCPNIFTY",
+    "SENSEX",
+    "BANKEX"
+]
+
 # ===== STORAGE =====
 baseline_rr = set()
-baseline_rs = set()
 baseline_sr = set()
-baseline_ss = set()
 
 morning_sent = False
 closing_sent = False
@@ -85,6 +93,35 @@ except Exception as e:
 
     print("Session Error:", e)
 
+# ===== FILTER STOCKS ONLY =====
+def filter_rows(rows):
+
+    filtered = []
+
+    for row in rows:
+
+        try:
+
+            symbol = str(row.get("symbol", "")).upper()
+
+            ignore = False
+
+            for idx in IGNORE_SYMBOLS:
+
+                if idx in symbol:
+                    ignore = True
+                    break
+
+            if ignore:
+                continue
+
+            filtered.append(row)
+
+        except:
+            pass
+
+    return filtered
+
 # ===== FETCH DATA =====
 def fetch_data():
 
@@ -104,40 +141,52 @@ def fetch_data():
 
     rr = data["data"][2]["Rise-in-OI-Rise"]
 
-    rs = data["data"][3]["Rise-in-OI-Slide"]
-
     sr = data["data"][1]["Slide-in-OI-Rise"]
 
-    ss = data["data"][0]["Slide-in-OI-Slide"]
+    rr = filter_rows(rr)
+    sr = filter_rows(sr)
 
-    return rr, rs, sr, ss
+    return rr, sr
 
 # ===== FORMAT MESSAGE =====
 def format_message(title, rows):
 
     msg = f"{title}\n\n"
 
-    for row in rows[:20]:
+    count = 0
+
+    for row in rows:
 
         try:
 
-            symbol = row["symbol"]
+            symbol = row.get("symbol", "")
 
-            instrument = row["instrument"]
+            expiry = row.get("expiryDate", "")
 
-            price = row["pChange"]
+            strike = row.get("strikePrice", "")
 
-            oi = row["pChangeInOI"]
+            option_type = row.get("optionType", "")
 
-            ltp = row["ltp"]
+            oi = row.get("pChangeInOI", "")
+
+            ltp = row.get("ltp", "")
+
+            instrument = row.get("instrument", "")
 
             msg += (
-                f"{symbol}\n"
-                f"{instrument}\n"
-                f"Price: {price}%\n"
-                f"OI: {oi}%\n"
+                f"Symbol: {symbol}\n"
+                f"Expiry: {expiry}\n"
+                f"Strike: {strike}\n"
+                f"Type: {option_type}\n"
+                f"Instrument: {instrument}\n"
+                f"OI Change: {oi}%\n"
                 f"LTP: {ltp}\n\n"
             )
+
+            count += 1
+
+            if count >= 15:
+                break
 
         except:
             pass
@@ -159,27 +208,30 @@ def process_new(rows, baseline, category):
 
             if key not in baseline:
 
-                symbol = row["symbol"]
+                symbol = row.get("symbol", "")
 
-                instrument = row["instrument"]
+                expiry = row.get("expiryDate", "")
 
-                price = row["pChange"]
+                strike = row.get("strikePrice", "")
 
-                oi = row["pChangeInOI"]
+                option_type = row.get("optionType", "")
 
-                ltp = row["ltp"]
+                oi = row.get("pChangeInOI", "")
 
-                volume = row["volume"]
+                ltp = row.get("ltp", "")
+
+                instrument = row.get("instrument", "")
 
                 msg = (
                     f"NEW ENTRY DETECTED\n\n"
                     f"Category:\n{category}\n\n"
                     f"Symbol: {symbol}\n"
-                    f"{instrument}\n\n"
-                    f"Price Change: {price}%\n"
+                    f"Expiry: {expiry}\n"
+                    f"Strike: {strike}\n"
+                    f"Type: {option_type}\n"
+                    f"Instrument: {instrument}\n"
                     f"OI Change: {oi}%\n"
-                    f"LTP: {ltp}\n"
-                    f"Volume: {volume}"
+                    f"LTP: {ltp}"
                 )
 
                 print(msg)
@@ -192,8 +244,8 @@ def process_new(rows, baseline, category):
 
     return current
 
-# ===== TEST START =====
-send_notification("BOT RESTARTED SUCCESSFULLY")
+# ===== BOT START =====
+send_notification("NSE STOCK OI ALERT BOT STARTED")
 
 # ===== MAIN LOOP =====
 while True:
@@ -206,15 +258,13 @@ while True:
 
         print("Running:", current_time)
 
-        rr, rs, sr, ss = fetch_data()
+        rr, sr = fetch_data()
 
-        # ===== 09:15 MORNING SUMMARY =====
+        # ===== 09:15 SUMMARY =====
         if current_time >= "09:15" and not morning_sent:
 
             baseline_rr = set(x["identifier"] for x in rr)
-            baseline_rs = set(x["identifier"] for x in rs)
             baseline_sr = set(x["identifier"] for x in sr)
-            baseline_ss = set(x["identifier"] for x in ss)
 
             send_notification(
                 format_message(
@@ -227,26 +277,8 @@ while True:
 
             send_notification(
                 format_message(
-                    "09:15 AM\nRise in OI + Slide in Price",
-                    rs
-                )
-            )
-
-            time.sleep(2)
-
-            send_notification(
-                format_message(
                     "09:15 AM\nSlide in OI + Rise in Price",
                     sr
-                )
-            )
-
-            time.sleep(2)
-
-            send_notification(
-                format_message(
-                    "09:15 AM\nSlide in OI + Slide in Price",
-                    ss
                 )
             )
 
@@ -254,7 +286,7 @@ while True:
 
             print("Morning Summary Sent")
 
-        # ===== LIVE MARKET =====
+        # ===== LIVE ALERTS =====
         if market_open():
 
             baseline_rr = process_new(
@@ -263,25 +295,13 @@ while True:
                 "Rise in OI + Rise in Price"
             )
 
-            baseline_rs = process_new(
-                rs,
-                baseline_rs,
-                "Rise in OI + Slide in Price"
-            )
-
             baseline_sr = process_new(
                 sr,
                 baseline_sr,
                 "Slide in OI + Rise in Price"
             )
 
-            baseline_ss = process_new(
-                ss,
-                baseline_ss,
-                "Slide in OI + Slide in Price"
-            )
-
-        # ===== 03:30 PM CLOSING SUMMARY =====
+        # ===== 03:30 PM CLOSE =====
         if current_time >= "15:30" and not closing_sent:
 
             send_notification(
@@ -295,26 +315,8 @@ while True:
 
             send_notification(
                 format_message(
-                    "03:30 PM CLOSE\nRise in OI + Slide in Price",
-                    rs
-                )
-            )
-
-            time.sleep(2)
-
-            send_notification(
-                format_message(
                     "03:30 PM CLOSE\nSlide in OI + Rise in Price",
                     sr
-                )
-            )
-
-            time.sleep(2)
-
-            send_notification(
-                format_message(
-                    "03:30 PM CLOSE\nSlide in OI + Slide in Price",
-                    ss
                 )
             )
 
