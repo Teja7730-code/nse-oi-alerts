@@ -57,7 +57,6 @@ def fetch_category_data(page, category_name):
 
     try:
 
-        # Open dropdown safely
         dropdown = page.locator("select")
 
         dropdown.first.select_option(label=category_name)
@@ -111,7 +110,7 @@ def fetch_category_data(page, category_name):
 
     return data
 
-# ===== SUMMARY =====
+# ===== CREATE SUMMARY =====
 def create_summary(data, title):
 
     msg = f"{title}\n\n"
@@ -178,18 +177,33 @@ with sync_playwright() as p:
         ]
     )
 
-    page = browser.new_page(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36"
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
+        viewport={"width": 1366, "height": 768},
+        locale="en-US"
     )
 
+    page = context.new_page()
+
+    # ===== OPEN NSE HOMEPAGE FIRST =====
+    page.goto(
+        "https://www.nseindia.com",
+        timeout=120000,
+        wait_until="domcontentloaded"
+    )
+
+    page.wait_for_timeout(5000)
+
+    # ===== OPEN OI SPURTS PAGE =====
     page.goto(
         "https://www.nseindia.com/market-data/oi-spurts",
-        timeout=120000
+        timeout=120000,
+        wait_until="domcontentloaded"
     )
 
     page.wait_for_timeout(10000)
 
-    # ===== TEST NOTIFICATION =====
+    # ===== START NOTIFICATION =====
     send_notification("NSE ALERT SYSTEM STARTED")
 
     # ===== MAIN LOOP =====
@@ -261,7 +275,7 @@ with sync_playwright() as p:
                     "Slide in OI and Rise in Price"
                 )
 
-            # ===== MARKET CLOSE =====
+            # ===== MARKET CLOSE SUMMARY =====
             if current_time >= "15:30" and not closing_sent:
 
                 send_notification(
