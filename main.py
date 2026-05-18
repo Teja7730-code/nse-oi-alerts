@@ -17,6 +17,11 @@ already_alerted_slide = set()
 morning_sent = False
 closing_sent = False
 
+# ===== CSV URLS =====
+rise_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_1.csv"
+
+slide_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_2.csv"
+
 # ===== NOTIFICATION =====
 def send_notification(message):
 
@@ -119,13 +124,32 @@ def process_new_stocks(df, baseline_set, alerted_set, category_name):
 
                 print("Alert Error:", e)
 
-# ===== CSV URLS =====
-rise_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_1.csv"
+# ===== TEST CURRENT MARKET CLOSE SUMMARY =====
+try:
 
-slide_url = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_2.csv"
+    rise_df = fetch_csv(rise_url)
 
-# ===== TEST MARKET CLOSE NOTIFICATION =====
-send_notification("MARKET CLOSE SUMMARY TEST WORKING")
+    slide_df = fetch_csv(slide_url)
+
+    rise_summary = create_summary(
+        rise_df,
+        "03:30 PM CLOSE\nRise in OI and Rise in Price\n"
+    )
+
+    slide_summary = create_summary(
+        slide_df,
+        "03:30 PM CLOSE\nSlide in OI and Rise in Price\n"
+    )
+
+    send_notification(rise_summary)
+
+    time.sleep(2)
+
+    send_notification(slide_summary)
+
+except Exception as e:
+
+    send_notification(f"TEST ERROR\n{e}")
 
 # ===== MAIN LOOP =====
 while True:
