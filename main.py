@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 
 TOPIC = "nseoialert"
 
@@ -11,64 +10,59 @@ def send_notification(message):
     )
 
 headers = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Referer": "https://www.nseindia.com/",
+    "Accept-Language": "en-US,en;q=0.9"
 }
 
 try:
 
     session = requests.Session()
 
-    # Open NSE homepage first
+    # Open homepage first
     session.get(
         "https://www.nseindia.com",
         headers=headers,
         timeout=30
     )
 
-    # Open OI Spurts page
+    # NSE OI Spurts API
+    url = "https://www.nseindia.com/api/live-analysis-oi-spurts-underlyings"
+
     response = session.get(
-        "https://www.nseindia.com/market-data/oi-spurts",
+        url,
         headers=headers,
         timeout=30
     )
 
-    soup = BeautifulSoup(response.text, "lxml")
+    data = response.json()
 
-    rows = soup.select("table tbody tr")
-
-    message = "NSE OI DATA TEST\n\n"
+    message = "NSE OI LIVE DATA\n\n"
 
     count = 0
 
-    for row in rows:
+    for item in data["data"]:
 
-        cols = row.find_all("td")
+        symbol = item.get("symbol", "")
 
-        if len(cols) >= 8:
+        oi_change = item.get("oiChangePerc", "")
 
-            symbol = cols[1].get_text(strip=True)
+        price_change = item.get("futPriceChangePerc", "")
 
-            ltp = cols[5].get_text(strip=True)
+        ltp = item.get("latestOI", "")
 
-            oi_change = cols[6].get_text(strip=True)
+        message += (
+            f"{symbol}\n"
+            f"OI Change: {oi_change}%\n"
+            f"Price Change: {price_change}%\n"
+            f"OI: {ltp}\n\n"
+        )
 
-            price_change = cols[7].get_text(strip=True)
-
-            message += (
-                f"{symbol}\n"
-                f"LTP: {ltp}\n"
-                f"OI: {oi_change}\n"
-                f"Price: {price_change}\n\n"
-            )
-
-            count += 1
+        count += 1
 
         if count >= 10:
             break
-
-    if count == 0:
-
-        message += "No rows found"
 
     send_notification(message)
 
