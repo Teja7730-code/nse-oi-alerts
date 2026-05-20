@@ -125,11 +125,21 @@ def filter_rows(rows):
 
             price_change = float(row.get("pChange", 0))
 
-            if oi_change < MIN_OI_CHANGE:
-                continue
-
+            # ===== PRICE FILTER =====
             if price_change < MIN_PRICE_CHANGE:
                 continue
+
+            # ===== RISE IN OI =====
+            if oi_change > 0:
+
+                if oi_change < MIN_OI_CHANGE:
+                    continue
+
+            # ===== SLIDE IN OI =====
+            if oi_change < 0:
+
+                if abs(oi_change) < MIN_OI_CHANGE:
+                    continue
 
             filtered.append(row)
 
@@ -141,28 +151,44 @@ def filter_rows(rows):
 # ===== FETCH DATA =====
 def fetch_data():
 
-    response = session.get(
-        API_URL,
-        headers=headers,
-        timeout=20
-    )
+    retries = 3
 
-    print("Status Code:", response.status_code)
+    for attempt in range(retries):
 
-    if response.status_code != 200:
+        try:
 
-        raise Exception(f"NSE API Failed: {response.status_code}")
+            response = session.get(
+                API_URL,
+                headers=headers,
+                timeout=20
+            )
 
-    data = response.json()
+            print("Status Code:", response.status_code)
 
-    rr = data["data"][2]["Rise-in-OI-Rise"]
+            if response.status_code != 200:
 
-    sr = data["data"][1]["Slide-in-OI-Rise"]
+                raise Exception(
+                    f"NSE API Failed: {response.status_code}"
+                )
 
-    rr = filter_rows(rr)
-    sr = filter_rows(sr)
+            data = response.json()
 
-    return rr, sr
+            rr = data["data"][2]["Rise-in-OI-Rise"]
+
+            sr = data["data"][1]["Slide-in-OI-Rise"]
+
+            rr = filter_rows(rr)
+            sr = filter_rows(sr)
+
+            return rr, sr
+
+        except Exception as e:
+
+            print(f"Retry {attempt+1} Failed:", e)
+
+            time.sleep(5)
+
+    return [], []
 
 # ===== FORMAT MESSAGE =====
 def format_message(title, rows):
@@ -375,6 +401,11 @@ while True:
 
         print("MAIN ERROR:", e)
 
-        send_notification(f"ERROR\n\n{e}")
+    # ===== NIGHT MODE =====
+    if not market_open():
 
-    time.sleep(60)
+        time.sleep(300)
+
+    else:
+
+        time.sleep(60)
